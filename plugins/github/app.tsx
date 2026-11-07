@@ -492,7 +492,12 @@ function AssigneeCell({ assignees }: { assignees: string[] }) {
       title={assignees.join(", ")}
     >
       {assignees.slice(0, 3).map((login) => (
-        <Avatar key={login} login={login} className="ring-1 ring-card" />
+        <Avatar
+          key={login}
+          login={login}
+          size="size-4"
+          className="ring-1 ring-card"
+        />
       ))}
       {assignees.length > 3 ? (
         <span className="pl-2.5 text-xs text-muted-foreground">
@@ -586,7 +591,7 @@ type GlyphSpec = { icon: string; className: string; label: string };
 function itemGlyph(item: Item): GlyphSpec {
   if (item.kind === "issue") {
     return item.state === "OPEN"
-      ? { icon: "Target", className: "text-green-500", label: "Open issue" }
+      ? { icon: "IssueOpened", className: "text-green-500", label: "Open issue" }
       : {
           icon: "CircleCheck",
           className: "text-purple-500",
@@ -634,6 +639,29 @@ const CHECKS_GLYPH: Record<
   },
 };
 
+function IssueOpenedIcon({
+  className,
+  label,
+}: {
+  className: string;
+  label: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      className={className}
+      role="img"
+      aria-label={label}
+    >
+      <circle cx="8" cy="8" r="6.25" />
+      <circle cx="8" cy="8" r="1.25" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function ItemGlyph({ item }: { item: Item }) {
   const glyph = itemGlyph(item);
   const conflicted =
@@ -641,11 +669,15 @@ function ItemGlyph({ item }: { item: Item }) {
   const label = conflicted ? `${glyph.label}, has conflicts` : glyph.label;
   return (
     <span className="relative flex size-4 shrink-0" title={label}>
-      <Icon
-        name={glyph.icon}
-        className={`size-4 ${glyph.className}`}
-        aria-label={label}
-      />
+      {glyph.icon === "IssueOpened" ? (
+        <IssueOpenedIcon className={`size-4 ${glyph.className}`} label={label} />
+      ) : (
+        <Icon
+          name={glyph.icon}
+          className={`size-4 ${glyph.className}`}
+          aria-label={label}
+        />
+      )}
       {conflicted ? (
         <Icon
           name="AlertTriangle"
@@ -719,7 +751,7 @@ function ItemRow({
         />
       }
       trailingMeta={
-        <span className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-3 text-xs text-muted-foreground">
           {item.kind === "pr" ? (
             <span className="font-mono">
               <span className="text-diff-added">+{item.pull.additions}</span>{" "}
@@ -728,7 +760,9 @@ function ItemRow({
           ) : item.assignees.length > 0 ? (
             <AssigneeCell assignees={item.assignees} />
           ) : null}
-          <span>{relativeTime(item.updatedAt)}</span>
+          <span className="w-14 text-right">
+            {relativeTime(item.updatedAt)}
+          </span>
         </span>
       }
       actions={
