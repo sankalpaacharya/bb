@@ -46,7 +46,9 @@ import {
   ResourceListPanel,
   ResourceListState,
   ResourceMeta,
+  ResourceOverflowMenu,
   ResourceRow,
+  type ResourceOverflowMenuItem,
 } from "@/components/ui/resource-list";
 import {
   Select,
@@ -530,59 +532,51 @@ function RowMenu({ item }: { item: Item }) {
       .catch((error: unknown) => toast.error(errorText(error)));
   };
 
+  const copyLink = () => {
+    void experimental_copyToClipboard({ text: item.url }).then((copied) => {
+      if (copied) toast.success("Link copied");
+      else toast.error("Could not copy the link");
+    });
+  };
+  const toggleState = () => {
+    setIssueState(
+      item.repo,
+      item.number,
+      item.state === "OPEN" ? "closed" : "open",
+    ).catch((error: unknown) => toast.error(errorText(error)));
+  };
+  const issueItems: ResourceOverflowMenuItem[] =
+    item.kind === "issue"
+      ? [
+          ...(viewer !== null
+            ? [
+                {
+                  label: assignedToMe ? "Unassign me" : "Assign to me",
+                  icon: "UserRoundPlus",
+                  onSelect: toggleSelfAssign,
+                },
+              ]
+            : []),
+          item.state === "OPEN"
+            ? { label: "Close issue", icon: "CircleCheck", onSelect: toggleState }
+            : { label: "Reopen issue", icon: "RotateCcw", onSelect: toggleState },
+          { kind: "separator" },
+        ]
+      : [];
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-7 text-muted-foreground"
-          onClick={(event) => event.stopPropagation()}
-        >
-          ⋮
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {item.kind === "issue" && viewer !== null ? (
-          <DropdownMenuItem onSelect={toggleSelfAssign}>
-            {assignedToMe ? "Unassign me" : "Assign to me"}
-          </DropdownMenuItem>
-        ) : null}
-        {item.kind === "issue" ? (
-          <DropdownMenuItem
-            onSelect={() =>
-              setIssueState(
-                item.repo,
-                item.number,
-                item.state === "OPEN" ? "closed" : "open",
-              ).catch((error: unknown) => toast.error(errorText(error)))
-            }
-          >
-            {item.state === "OPEN" ? "Close issue" : "Reopen issue"}
-          </DropdownMenuItem>
-        ) : null}
-        {item.kind === "issue" ? <DropdownMenuSeparator /> : null}
-        <DropdownMenuItem
-          onSelect={() => {
-            navigate.openUrl(item.url);
-          }}
-        >
-          Open on GitHub ↗
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => {
-            void experimental_copyToClipboard({ text: item.url }).then(
-              (copied) => {
-                if (copied) toast.success("Link copied");
-                else toast.error("Could not copy the link");
-              },
-            );
-          }}
-        >
-          Copy link
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ResourceOverflowMenu
+      label={`#${item.number} actions`}
+      items={[
+        ...issueItems,
+        {
+          label: "Open on GitHub",
+          icon: "ExternalLink",
+          onSelect: () => navigate.openUrl(item.url),
+        },
+        { label: "Copy link", icon: "Copy", onSelect: copyLink },
+      ]}
+    />
   );
 }
 
@@ -735,20 +729,26 @@ function ItemRow({
         ) : undefined
       }
       description={
-        <ResourceMeta
-          items={[
-            author.length > 0 ? (
-              <span className="inline-flex items-center gap-1.5">
-                <Avatar login={author} size="size-4" />
-                {author}
-              </span>
-            ) : null,
-            item.repo,
-            item.labels.length > 0 ? (
-              <LabelChips labels={item.labels} compact />
-            ) : null,
-          ]}
-        />
+        <span className="flex min-w-0 items-center gap-2">
+          <ResourceMeta
+            items={[
+              author.length > 0 ? (
+                <span className="inline-flex items-center gap-1.5" title={author}>
+                  <Avatar login={author} size="size-4" />
+                  <span className="hidden @[32rem]/github-list:inline">
+                    {author}
+                  </span>
+                </span>
+              ) : null,
+              item.repo,
+            ]}
+          />
+          <LabelChips
+            labels={item.labels}
+            className="hidden shrink-0 @[40rem]/github-list:flex"
+            compact
+          />
+        </span>
       }
       trailingMeta={
         <span className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -758,7 +758,9 @@ function ItemRow({
               <span className="text-diff-removed">−{item.pull.deletions}</span>
             </span>
           ) : item.assignees.length > 0 ? (
-            <AssigneeCell assignees={item.assignees} />
+            <span className="hidden @[32rem]/github-list:flex">
+              <AssigneeCell assignees={item.assignees} />
+            </span>
           ) : null}
           <span className="w-14 text-right">
             {relativeTime(item.updatedAt)}
@@ -771,8 +773,9 @@ function ItemRow({
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
+              className="ml-2 h-7 px-2.5 font-normal"
               disabled={spawningKey !== null}
+              aria-busy={busy}
               onClick={() =>
                 spawn(
                   item.kind === "issue" ? "startWork" : "startReview",
@@ -781,7 +784,13 @@ function ItemRow({
                 )
               }
             >
-              {busy ? "…" : item.kind === "issue" ? "Start" : "Review"}
+              {item.kind === "issue"
+                ? busy
+                  ? "Starting…"
+                  : "Start"
+                : busy
+                  ? "Reviewing…"
+                  : "Review"}
             </Button>
             <RowMenu item={item} />
           </>
@@ -822,7 +831,7 @@ function ItemList({
   const viewer = useViewer();
   const groups = useMemo(() => groupItems(items, viewer), [items, viewer]);
   return (
-    <div className="flex flex-col gap-4">
+    <div className="@container/github-list flex flex-col gap-4">
       {groups.map((group) => {
         const heading = GROUP_HEADINGS[kind][group.key];
         return (
