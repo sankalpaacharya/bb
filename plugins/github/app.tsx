@@ -697,6 +697,11 @@ function ChecksGlyph({ checks }: { checks: PullSummary["checks"] }) {
   );
 }
 
+const SPAWN_LABELS = {
+  issue: { idle: "Start", busy: "Starting…" },
+  pr: { idle: "Review", busy: "Reviewing…" },
+} as const;
+
 function ItemRow({
   item,
   links,
@@ -782,13 +787,7 @@ function ItemRow({
                 )
               }
             >
-              {item.kind === "issue"
-                ? busy
-                  ? "Starting…"
-                  : "Start"
-                : busy
-                  ? "Reviewing…"
-                  : "Review"}
+              {SPAWN_LABELS[item.kind][busy ? "busy" : "idle"]}
             </Button>
             <RowMenu item={item} />
           </>
