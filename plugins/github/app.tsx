@@ -751,7 +751,7 @@ function ItemRow({
         </span>
       }
       trailingMeta={
-        <span className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="flex items-center gap-2.5 text-xs text-muted-foreground">
           {item.kind === "pr" ? (
             <span className="font-mono">
               <span className="text-diff-added">+{item.pull.additions}</span>{" "}
@@ -762,9 +762,7 @@ function ItemRow({
               <AssigneeCell assignees={item.assignees} />
             </span>
           ) : null}
-          <span className="w-14 text-right">
-            {relativeTime(item.updatedAt)}
-          </span>
+          <span className="tabular-nums">{relativeTime(item.updatedAt)}</span>
         </span>
       }
       actions={
