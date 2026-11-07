@@ -571,9 +571,7 @@ async function fetchRepoItems(
   });
   const toIssues = (nodes: z.infer<typeof listNodeSchema>[]): CachedItem[] =>
     nodes.map((entry) => ({ ...fields(entry), kind: "issue" }));
-  const toPulls = (
-    nodes: z.infer<typeof pullListNodeSchema>[],
-  ): CachedItem[] =>
+  const toPulls = (nodes: z.infer<typeof pullListNodeSchema>[]): CachedItem[] =>
     nodes.map((entry) => ({
       ...fields(entry),
       kind: "pr",

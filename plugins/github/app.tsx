@@ -558,8 +558,16 @@ function RowMenu({ item }: { item: Item }) {
               ]
             : []),
           item.state === "OPEN"
-            ? { label: "Close issue", icon: "CircleCheck", onSelect: toggleState }
-            : { label: "Reopen issue", icon: "RotateCcw", onSelect: toggleState },
+            ? {
+                label: "Close issue",
+                icon: "CircleCheck",
+                onSelect: toggleState,
+              }
+            : {
+                label: "Reopen issue",
+                icon: "RotateCcw",
+                onSelect: toggleState,
+              },
           { kind: "separator" },
         ]
       : [];
@@ -585,7 +593,11 @@ type GlyphSpec = { icon: string; className: string; label: string };
 function itemGlyph(item: Item): GlyphSpec {
   if (item.kind === "issue") {
     return item.state === "OPEN"
-      ? { icon: "IssueOpened", className: "text-green-500", label: "Open issue" }
+      ? {
+          icon: "IssueOpened",
+          className: "text-green-500",
+          label: "Open issue",
+        }
       : {
           icon: "CircleCheck",
           className: "text-purple-500",
@@ -664,7 +676,10 @@ function ItemGlyph({ item }: { item: Item }) {
   return (
     <span className="relative flex size-4 shrink-0" title={label}>
       {glyph.icon === "IssueOpened" ? (
-        <IssueOpenedIcon className={`size-4 ${glyph.className}`} label={label} />
+        <IssueOpenedIcon
+          className={`size-4 ${glyph.className}`}
+          label={label}
+        />
       ) : (
         <Icon
           name={glyph.icon}
@@ -727,7 +742,9 @@ function ItemRow({
           {item.title}
         </>
       }
-      state={item.kind === "pr" ? <ChecksGlyph checks={item.pull.checks} /> : null}
+      state={
+        item.kind === "pr" ? <ChecksGlyph checks={item.pull.checks} /> : null
+      }
       titleAside={
         links !== undefined && links.length > 0 ? (
           <ThreadPills links={links} />
@@ -735,22 +752,27 @@ function ItemRow({
       }
       description={
         <span className="flex min-w-0 items-center gap-2">
-          <ResourceMeta
-            items={[
-              author.length > 0 ? (
-                <span className="inline-flex items-center gap-1.5" title={author}>
-                  <Avatar login={author} size="size-4" />
-                  <span className="hidden @[32rem]/github-list:inline">
-                    {author}
+          <span className="shrink-0">
+            <ResourceMeta
+              items={[
+                author.length > 0 ? (
+                  <span
+                    className="inline-flex items-center gap-1.5"
+                    title={author}
+                  >
+                    <Avatar login={author} size="size-4" />
+                    <span className="hidden @[32rem]/github-list:inline">
+                      {author}
+                    </span>
                   </span>
-                </span>
-              ) : null,
-              item.repo,
-            ]}
-          />
+                ) : null,
+                item.repo,
+              ]}
+            />
+          </span>
           <LabelChips
             labels={item.labels}
-            className="hidden shrink-0 @[40rem]/github-list:flex"
+            className="hidden min-w-0 overflow-hidden @[40rem]/github-list:flex"
             compact
           />
         </span>
@@ -904,9 +926,7 @@ function ItemsTable({
       />
     );
   }
-  return (
-    <ItemList kind={kind} items={items} onOpenItem={onOpenItem} actions />
-  );
+  return <ItemList kind={kind} items={items} onOpenItem={onOpenItem} actions />;
 }
 
 function SidebarHeading({ children }: { children: React.ReactNode }) {
