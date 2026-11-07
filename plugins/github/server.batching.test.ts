@@ -41,13 +41,23 @@ function node(number: number, state = "OPEN") {
     updatedAt: "2026-09-10T00:00:00Z",
   };
 }
+function pullNode(number: number, state = "OPEN") {
+  return {
+    ...node(number, state),
+    isDraft: false,
+    additions: 4,
+    deletions: 2,
+    mergeable: "MERGEABLE",
+    commits: { nodes: [] },
+  };
+}
 function repository() {
   return {
     hasIssuesEnabled: true,
     openIssues: { nodes: [node(1)] },
     closedIssues: { nodes: [node(2, "CLOSED")] },
-    openPrs: { nodes: [node(3)] },
-    closedPrs: { nodes: [node(4, "CLOSED"), node(5, "MERGED")] },
+    openPrs: { nodes: [pullNode(3)] },
+    closedPrs: { nodes: [pullNode(4, "CLOSED"), pullNode(5, "MERGED")] },
   };
 }
 function response(repo = repository()) {
@@ -125,7 +135,7 @@ it("accepts deleted authors and empty connections, discards disabled issues, and
     openPrs: {
       nodes: [
         {
-          ...node(3),
+          ...pullNode(3),
           author: null,
           labels: { nodes: [] },
           assignees: { nodes: [] },

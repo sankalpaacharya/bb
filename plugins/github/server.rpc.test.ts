@@ -48,6 +48,13 @@ beforeEach(() => {
       url: "https://github.com/acme/widgets/pull/42",
       body: "Normalize every GitHub shape.",
       updatedAt: "2026-08-19T13:00:00Z",
+      isDraft: true,
+      additions: 12,
+      deletions: 3,
+      mergeable: "CONFLICTING",
+      commits: {
+        nodes: [{ commit: { statusCheckRollup: { state: "ERROR" } } }],
+      },
     },
   ];
   const lists = JSON.stringify({
@@ -356,6 +363,23 @@ describe("github plugin RPC behavior", () => {
           kind: "issue",
           labels: ["bug", "old"],
           assignees: ["octocat"],
+        },
+      ],
+    });
+    await expect(
+      harness.callRpc("listItems", { kind: "pr" }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          number: 42,
+          kind: "pr",
+          pull: {
+            isDraft: true,
+            additions: 12,
+            deletions: 3,
+            checks: "failure",
+            conflicted: true,
+          },
         },
       ],
     });

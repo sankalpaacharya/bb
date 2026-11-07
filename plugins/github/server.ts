@@ -36,21 +36,33 @@ const nonBlankStringSchema = z
 const repoInfoSchema = z
   .object({ repo: repoNameSchema, projectId: z.string().nullable() })
   .strict();
-const itemSchema = z
+const itemFields = {
+  repo: repoNameSchema,
+  number: itemNumberSchema,
+  title: z.string(),
+  state: z.string(),
+  author: z.string(),
+  labels: z.array(z.string()),
+  assignees: z.array(z.string()),
+  url: z.string(),
+  body: z.string(),
+  updatedAt: z.string(),
+};
+const pullSummarySchema = z
   .object({
-    repo: repoNameSchema,
-    number: itemNumberSchema,
-    kind: z.enum(["issue", "pr"]),
-    title: z.string(),
-    state: z.string(),
-    author: z.string(),
-    labels: z.array(z.string()),
-    assignees: z.array(z.string()),
-    url: z.string(),
-    body: z.string(),
-    updatedAt: z.string(),
+    isDraft: z.boolean(),
+    additions: z.number().int().nonnegative(),
+    deletions: z.number().int().nonnegative(),
+    checks: z.enum(["success", "failure", "pending", "none"]),
+    conflicted: z.boolean(),
   })
   .strict();
+const itemSchema = z.discriminatedUnion("kind", [
+  z.object({ ...itemFields, kind: z.literal("issue") }).strict(),
+  z
+    .object({ ...itemFields, kind: z.literal("pr"), pull: pullSummarySchema })
+    .strict(),
+]);
 const syncResultSchema = z
   .object({
     repos: z.number().int().nonnegative(),
@@ -438,6 +450,33 @@ const listNodeSchema = z.object({
   body: z.string(),
   updatedAt: z.string(),
 });
+const pullListNodeSchema = listNodeSchema.extend({
+  isDraft: z.boolean(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  mergeable: z.enum(["MERGEABLE", "CONFLICTING", "UNKNOWN"]),
+  commits: z.object({
+    nodes: z
+      .array(
+        z.object({
+          commit: z.object({
+            statusCheckRollup: z
+              .object({
+                state: z.enum([
+                  "SUCCESS",
+                  "FAILURE",
+                  "ERROR",
+                  "PENDING",
+                  "EXPECTED",
+                ]),
+              })
+              .nullable(),
+          }),
+        }),
+      )
+      .max(1),
+  }),
+});
 const repositoryListsSchema = z.object({
   data: z.object({
     repository: z.object({
@@ -454,12 +493,14 @@ const repositoryListsSchema = z.object({
       }),
       openPrs: z.object({
         nodes: z
-          .array(listNodeSchema.extend({ state: z.literal("OPEN") }))
+          .array(pullListNodeSchema.extend({ state: z.literal("OPEN") }))
           .max(PR_PAGE),
       }),
       closedPrs: z.object({
         nodes: z
-          .array(listNodeSchema.extend({ state: z.enum(["CLOSED", "MERGED"]) }))
+          .array(
+            pullListNodeSchema.extend({ state: z.enum(["CLOSED", "MERGED"]) }),
+          )
           .max(CLOSED_PR_PAGE),
       }),
     }),
@@ -472,6 +513,10 @@ const listFields = `
   assignees(first: 100) { nodes { login } }
   url body updatedAt
 `;
+const pullListFields = `${listFields}
+  isDraft additions deletions mergeable
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+`;
 const repositoryListsQuery = `query RepositoryLists($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     hasIssuesEnabled
@@ -482,10 +527,10 @@ const repositoryListsQuery = `query RepositoryLists($owner: String!, $name: Stri
       nodes { ${listFields} }
     }
     openPrs: pullRequests(first: ${PR_PAGE}, states: [OPEN], orderBy: {field: CREATED_AT, direction: DESC}) {
-      nodes { ${listFields} }
+      nodes { ${pullListFields} }
     }
     closedPrs: pullRequests(first: ${CLOSED_PR_PAGE}, states: [CLOSED, MERGED], orderBy: {field: CREATED_AT, direction: DESC}) {
-      nodes { ${listFields} }
+      nodes { ${pullListFields} }
     }
   }
 }`;
@@ -510,35 +555,57 @@ async function fetchRepoItems(
   const {
     data: { repository },
   } = repositoryListsSchema.parse(JSON.parse(raw));
-  const toItems = (
-    nodes: z.infer<typeof listNodeSchema>[],
-    kind: "issue" | "pr",
+  const fields = (entry: z.infer<typeof listNodeSchema>) => ({
+    repo,
+    number: entry.number,
+    title: entry.title,
+    state: entry.state,
+    author: entry.author?.id
+      ? entry.author.login
+      : `app/${entry.author?.login ?? ""}`,
+    labels: entry.labels.nodes.map((label) => label.name),
+    assignees: entry.assignees.nodes.map((user) => user.login),
+    url: entry.url,
+    body: entry.body,
+    updatedAt: entry.updatedAt,
+  });
+  const toIssues = (nodes: z.infer<typeof listNodeSchema>[]): CachedItem[] =>
+    nodes.map((entry) => ({ ...fields(entry), kind: "issue" }));
+  const toPulls = (
+    nodes: z.infer<typeof pullListNodeSchema>[],
   ): CachedItem[] =>
     nodes.map((entry) => ({
-      repo,
-      number: entry.number,
-      kind,
-      title: entry.title,
-      state: entry.state,
-      author: entry.author?.id
-        ? entry.author.login
-        : `app/${entry.author?.login ?? ""}`,
-      labels: entry.labels.nodes.map((label) => label.name),
-      assignees: entry.assignees.nodes.map((user) => user.login),
-      url: entry.url,
-      body: entry.body,
-      updatedAt: entry.updatedAt,
+      ...fields(entry),
+      kind: "pr",
+      pull: {
+        isDraft: entry.isDraft,
+        additions: entry.additions,
+        deletions: entry.deletions,
+        checks: rollupChecks(
+          entry.commits.nodes[0]?.commit.statusCheckRollup?.state,
+        ),
+        conflicted: entry.mergeable === "CONFLICTING",
+      },
     }));
   return [
     ...(repository.hasIssuesEnabled
       ? [
-          ...toItems(repository.openIssues.nodes, "issue"),
-          ...toItems(repository.closedIssues.nodes, "issue"),
+          ...toIssues(repository.openIssues.nodes),
+          ...toIssues(repository.closedIssues.nodes),
         ]
       : []),
-    ...toItems(repository.openPrs.nodes, "pr"),
-    ...toItems(repository.closedPrs.nodes, "pr"),
+    ...toPulls(repository.openPrs.nodes),
+    ...toPulls(repository.closedPrs.nodes),
   ];
+}
+
+function rollupChecks(
+  state: "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED" | undefined,
+): z.infer<typeof pullSummarySchema>["checks"] {
+  if (state === undefined) return "none";
+  if (state === "SUCCESS") return "success";
+  if (state === "FAILURE" || state === "ERROR") return "failure";
+  return "pending";
 }
 
 export default async function plugin(bb: BbPluginApi) {
@@ -710,6 +777,8 @@ export default async function plugin(bb: BbPluginApi) {
        PRIMARY KEY (repo, kind, number)
      )`,
     `ALTER TABLE items ADD COLUMN assignees TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE items ADD COLUMN pull TEXT`,
+    `DELETE FROM items WHERE kind = 'pr'`,
   ]);
 
   function parseStringArray(raw: unknown): string[] {
@@ -721,10 +790,9 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   function rowToItem(row: Record<string, unknown>): CachedItem {
-    return {
+    const fields = {
       repo: String(row.repo),
       number: Number(row.number),
-      kind: row.kind === "pr" ? "pr" : "issue",
       title: String(row.title),
       state: String(row.state),
       author: String(row.author),
@@ -733,6 +801,12 @@ export default async function plugin(bb: BbPluginApi) {
       url: String(row.url),
       body: String(row.body),
       updatedAt: String(row.updated_at),
+    };
+    if (row.kind !== "pr") return { ...fields, kind: "issue" };
+    return {
+      ...fields,
+      kind: "pr",
+      pull: pullSummarySchema.parse(JSON.parse(String(row.pull))),
     };
   }
 
@@ -790,8 +864,8 @@ export default async function plugin(bb: BbPluginApi) {
 
   function replaceRepoRows(repo: string, items: CachedItem[]): void {
     const insert = db.prepare(
-      `INSERT INTO items (repo, number, kind, title, state, author, labels, assignees, url, body, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO items (repo, number, kind, title, state, author, labels, assignees, url, body, updated_at, pull)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     db.transaction(() => {
       db.prepare("DELETE FROM items WHERE repo = ?").run(repo);
@@ -808,6 +882,7 @@ export default async function plugin(bb: BbPluginApi) {
           item.url,
           item.body,
           item.updatedAt,
+          item.kind === "pr" ? JSON.stringify(item.pull) : null,
         );
       }
     })();
@@ -1671,6 +1746,7 @@ export default async function plugin(bb: BbPluginApi) {
       assignees: item.assignees,
       url: item.url,
       updatedAt: item.updatedAt,
+      ...(item.kind === "pr" ? { pull: item.pull } : {}),
     };
   }
 
