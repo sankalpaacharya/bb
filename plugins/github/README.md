@@ -12,7 +12,9 @@ bb plugin install github
 
 - **Sidebar panel** (GitHub logo, full width): Issues and Pull requests tabs
   across every tracked repo, with a repo filter (persisted in localStorage)
-  and a New issue form.
+  and a New issue form. Each row shows the author, repo, and labels. Pull
+  request rows also show draft, checks, merge-conflict, and diff stats. Your
+  own pull requests and the issues assigned to you are listed first.
 - **Issue detail**: markdown body, comments, comment box, status,
   assignee, and label editing, plus "Send agent".
   Deep-linkable via the URL hash: `#/issues/<owner>/<repo>/<number>`.
@@ -26,6 +28,9 @@ bb plugin install github
   discoverable by agents through the plugin-commands skill. Each command takes
   `--json` (`{"ok":true,…}` on success, `{"ok":false,"error":{…}}` on failure)
   and `--help`, which prints its arguments and options and exits 0.
+  `bb github prs --json` rows carry a `pull` object: `isDraft`, `additions`,
+  `deletions`, `checks` (`success`, `failure`, `pending`, or `none`), and
+  `conflicted`.
 
 ## Auth
 
