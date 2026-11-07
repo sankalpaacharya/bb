@@ -15,11 +15,13 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import {
   buildSuggestions,
+  groupItems,
   matchesQuery,
   parseQuery,
   parseSubPath,
   routeToSubPath,
   type Item,
+  type ItemGroup,
   type Route,
   type Suggestion,
   type SuggestionIcon,
@@ -29,6 +31,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
+import { Icon } from "@/components/ui/icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +42,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  ResourceListPanel,
+  ResourceListState,
+  ResourceMeta,
+  ResourceRow,
+} from "@/components/ui/resource-list";
 import {
   Select,
   SelectContent,
@@ -66,6 +75,7 @@ type LinksMap = PluginRpcResult<
   (typeof githubRpcContract)["listLinks"]
 >["links"];
 type ThreadLink = LinksMap[string][number];
+type PullSummary = Extract<Item, { kind: "pr" }>["pull"];
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -200,24 +210,6 @@ function Avatar({
   );
 }
 
-function ChevronDownIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0 opacity-50"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
 function RefreshIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -255,15 +247,6 @@ function StateDot({ kind, state }: { kind: "issue" | "pr"; state: string }) {
   );
 }
 
-function StateBadge({ kind, state }: { kind: "issue" | "pr"; state: string }) {
-  return (
-    <Badge variant="outline" className="gap-1.5 font-normal">
-      <StateDot kind={kind} state={state} />
-      {state.toLowerCase()}
-    </Badge>
-  );
-}
-
 function ThreadPills({ links }: { links: ThreadLink[] | undefined }) {
   const navigate = useBbNavigate();
   if (links === undefined || links.length === 0) return null;
@@ -290,9 +273,11 @@ function ThreadPills({ links }: { links: ThreadLink[] | undefined }) {
 function LabelChips({
   labels,
   className,
+  compact = false,
 }: {
   labels: string[];
   className?: string;
+  compact?: boolean;
 }) {
   if (labels.length === 0) return null;
   return (
@@ -301,7 +286,7 @@ function LabelChips({
         <Badge
           key={label}
           variant="secondary"
-          className="font-normal text-muted-foreground"
+          className={`font-normal text-muted-foreground ${compact ? "px-1.5 py-0 text-2xs" : ""}`}
         >
           {label}
         </Badge>
@@ -425,6 +410,11 @@ function FilterBar({
 
   return (
     <div className="relative">
+      <Icon
+        name="Search"
+        className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
       <input
         ref={inputRef}
         value={value}
@@ -438,8 +428,8 @@ function FilterBar({
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={onKeyDown}
-        placeholder="Filter — is:open assignee:@me label:bug, or plain text"
-        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 pr-8 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        placeholder={`Search ${kind === "pr" ? "pull requests" : "issues"}, or is:open author:@me label:bug`}
+        className="flex h-9 w-full rounded-md border border-input bg-transparent py-1 pl-8 pr-8 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         spellCheck={false}
         autoComplete="off"
       />
@@ -492,15 +482,6 @@ function FilterBar({
   );
 }
 
-const COL = {
-  id: "shrink-0 @[48rem]:w-12",
-  assignee: "shrink-0 @[48rem]:w-20",
-  status: "shrink-0 @[48rem]:w-24",
-  updated: "hidden w-14 shrink-0 text-right @[48rem]:block",
-  actions:
-    "ml-auto flex shrink-0 items-center justify-end gap-1 @[48rem]:ml-0 @[48rem]:w-24",
-} as const;
-
 function AssigneeCell({ assignees }: { assignees: string[] }) {
   if (assignees.length === 0) {
     return <span className="text-muted-foreground/50">—</span>;
@@ -519,49 +500,6 @@ function AssigneeCell({ assignees }: { assignees: string[] }) {
         </span>
       ) : null}
     </span>
-  );
-}
-
-function StatusCell({ item }: { item: Item }) {
-  const { setIssueState } = useIssueMutations();
-  const [pending, setPending] = useState(false);
-  if (item.kind === "pr") {
-    return <StateBadge kind="pr" state={item.state} />;
-  }
-  const change = (next: "open" | "closed") => {
-    if ((item.state === "OPEN") === (next === "open")) return;
-    setPending(true);
-    setIssueState(item.repo, item.number, next)
-      .catch((error: unknown) => toast.error(errorText(error)))
-      .finally(() => setPending(false));
-  };
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={pending}>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 px-2 text-xs font-normal"
-          onClick={(event) => event.stopPropagation()}
-          aria-label={`Change issue #${item.number} state, currently ${item.state.toLowerCase()}`}
-          aria-busy={pending}
-        >
-          <StateDot kind="issue" state={item.state} />
-          <span>{pending ? "…" : item.state.toLowerCase()}</span>
-          <ChevronDownIcon />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuItem onSelect={() => change("open")}>
-          <StateDot kind="issue" state="OPEN" />
-          Open
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => change("closed")}>
-          <StateDot kind="issue" state="CLOSED" />
-          Closed
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -643,106 +581,238 @@ function RowMenu({ item }: { item: Item }) {
   );
 }
 
+type GlyphSpec = { icon: string; className: string; label: string };
+
+function itemGlyph(item: Item): GlyphSpec {
+  if (item.kind === "issue") {
+    return item.state === "OPEN"
+      ? { icon: "Target", className: "text-green-500", label: "Open issue" }
+      : {
+          icon: "CircleCheck",
+          className: "text-purple-500",
+          label: "Closed issue",
+        };
+  }
+  if (item.state === "MERGED") {
+    return { icon: "GitMerge", className: "text-purple-500", label: "Merged" };
+  }
+  if (item.state !== "OPEN") {
+    return {
+      icon: "GitPullRequestClosed",
+      className: "text-red-500",
+      label: "Closed",
+    };
+  }
+  if (item.pull.isDraft) {
+    return {
+      icon: "GitPullRequestDraft",
+      className: "text-muted-foreground",
+      label: "Draft",
+    };
+  }
+  return { icon: "GitPullRequest", className: "text-green-500", label: "Open" };
+}
+
+const CHECKS_GLYPH: Record<
+  Exclude<PullSummary["checks"], "none">,
+  GlyphSpec
+> = {
+  success: {
+    icon: "CircleCheck",
+    className: "text-green-500",
+    label: "Checks passed",
+  },
+  failure: {
+    icon: "CircleX",
+    className: "text-red-500",
+    label: "Checks failed",
+  },
+  pending: {
+    icon: "Clock",
+    className: "text-amber-500",
+    label: "Checks running",
+  },
+};
+
+function ItemGlyph({ item }: { item: Item }) {
+  const glyph = itemGlyph(item);
+  const conflicted =
+    item.kind === "pr" && item.state === "OPEN" && item.pull.conflicted;
+  const label = conflicted ? `${glyph.label}, has conflicts` : glyph.label;
+  return (
+    <span className="relative flex size-4 shrink-0" title={label}>
+      <Icon
+        name={glyph.icon}
+        className={`size-4 ${glyph.className}`}
+        aria-label={label}
+      />
+      {conflicted ? (
+        <Icon
+          name="AlertTriangle"
+          className="absolute -bottom-1 -right-1 size-2.5 rounded-full bg-background text-red-500"
+          aria-hidden
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function ChecksGlyph({ checks }: { checks: PullSummary["checks"] }) {
+  if (checks === "none") return null;
+  const glyph = CHECKS_GLYPH[checks];
+  return (
+    <span className="flex shrink-0" title={glyph.label}>
+      <Icon
+        name={glyph.icon}
+        className={`size-3.5 ${glyph.className}`}
+        aria-label={glyph.label}
+      />
+    </span>
+  );
+}
+
 function ItemRow({
   item,
   links,
   onOpen,
+  actions,
 }: {
   item: Item;
   links: ThreadLink[] | undefined;
   onOpen: () => void;
+  actions: boolean;
 }) {
   const { spawn, spawningKey } = useSpawn();
   const busy = spawningKey === `${item.repo}#${item.number}`;
+  const author = item.author.replace(/^app\//, "");
   return (
-    <div
-      className="grid cursor-pointer grid-cols-1 gap-y-2 px-3 py-3 hover:bg-accent/50 @[48rem]:flex @[48rem]:items-center @[48rem]:gap-3 @[48rem]:py-2"
-      onClick={onOpen}
-    >
-      <span className="flex min-w-0 flex-col items-start gap-1.5 @[48rem]:order-2 @[48rem]:flex-1 @[48rem]:flex-row @[48rem]:items-center @[48rem]:gap-2">
-        <span className="min-w-0 flex-1 line-clamp-3 text-sm font-medium leading-snug text-foreground @[48rem]:line-clamp-1 @[48rem]:leading-normal">
+    <ResourceRow
+      leading={<ItemGlyph item={item} />}
+      title={
+        <>
+          <span className="font-mono text-xs font-normal text-muted-foreground">
+            #{item.number}
+          </span>{" "}
           {item.title}
-        </span>
-        <LabelChips
-          labels={item.labels}
-          className="hidden shrink-0 @[60rem]:flex"
+        </>
+      }
+      state={item.kind === "pr" ? <ChecksGlyph checks={item.pull.checks} /> : null}
+      titleAside={
+        links !== undefined && links.length > 0 ? (
+          <ThreadPills links={links} />
+        ) : undefined
+      }
+      description={
+        <ResourceMeta
+          items={[
+            author.length > 0 ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Avatar login={author} size="size-4" />
+                {author}
+              </span>
+            ) : null,
+            item.repo,
+            item.labels.length > 0 ? (
+              <LabelChips labels={item.labels} compact />
+            ) : null,
+          ]}
         />
-        <ThreadPills links={links} />
-      </span>
-      <span className="flex min-w-0 items-center gap-2 @[48rem]:contents">
-        <span
-          className={`${COL.id} font-mono text-xs text-muted-foreground @[48rem]:order-1`}
-        >
-          #{item.number}
+      }
+      trailingMeta={
+        <span className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+          {item.kind === "pr" ? (
+            <span className="font-mono">
+              <span className="text-diff-added">+{item.pull.additions}</span>{" "}
+              <span className="text-diff-removed">−{item.pull.deletions}</span>
+            </span>
+          ) : item.assignees.length > 0 ? (
+            <AssigneeCell assignees={item.assignees} />
+          ) : null}
+          <span>{relativeTime(item.updatedAt)}</span>
         </span>
-        <span
-          className={`${COL.assignee} ${item.assignees.length === 0 ? "hidden @[48rem]:flex" : "flex"} text-xs text-muted-foreground @[48rem]:order-3`}
-        >
-          <AssigneeCell assignees={item.assignees} />
-        </span>
-        <span className={`${COL.status} @[48rem]:order-4`}>
-          <StatusCell item={item} />
-        </span>
-        <span
-          className={`${COL.updated} text-xs text-muted-foreground @[48rem]:order-5`}
-        >
-          {relativeTime(item.updatedAt)}
-        </span>
-        <span className={`${COL.actions} @[48rem]:order-6`}>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7"
-            disabled={spawningKey !== null}
-            onClick={(event) => {
-              event.stopPropagation();
-              spawn(
-                item.kind === "issue" ? "startWork" : "startReview",
-                item.repo,
-                item.number,
-              );
-            }}
-          >
-            {busy ? "…" : item.kind === "issue" ? "Start" : "Review"}
-          </Button>
-          <RowMenu item={item} />
-        </span>
-      </span>
-    </div>
+      }
+      actions={
+        actions ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={spawningKey !== null}
+              onClick={() =>
+                spawn(
+                  item.kind === "issue" ? "startWork" : "startReview",
+                  item.repo,
+                  item.number,
+                )
+              }
+            >
+              {busy ? "…" : item.kind === "issue" ? "Start" : "Review"}
+            </Button>
+            <RowMenu item={item} />
+          </>
+        ) : undefined
+      }
+      openLabel={`Open ${item.kind === "pr" ? "pull request" : "issue"} #${item.number}`}
+      onOpen={onOpen}
+    />
   );
 }
 
-function TableSkeleton() {
+const GROUP_HEADINGS: Record<
+  "issue" | "pr",
+  Record<ItemGroup["key"], { icon: string; label: string }>
+> = {
+  pr: {
+    mine: { icon: "Edit", label: "Authored" },
+    others: { icon: "UserRound", label: "Others" },
+  },
+  issue: {
+    mine: { icon: "UserRound", label: "Assigned to you" },
+    others: { icon: "ListView", label: "Others" },
+  },
+};
+
+function ItemList({
+  kind,
+  items,
+  onOpenItem,
+  actions,
+}: {
+  kind: "issue" | "pr";
+  items: Item[];
+  onOpenItem: (repo: string, number: number) => void;
+  actions: boolean;
+}) {
+  const links = useLinks();
+  const viewer = useViewer();
+  const groups = useMemo(() => groupItems(items, viewer), [items, viewer]);
   return (
-    <DelayedLoading>
-      <div className="divide-y divide-border">
-        {[0, 1, 2, 3].map((row) => (
-          <div
-            key={row}
-            className="grid grid-cols-1 gap-y-3 px-3 py-3 @[48rem]:flex @[48rem]:items-center @[48rem]:gap-3"
-          >
-            <Skeleton className="h-3 w-4/5 @[48rem]:order-2 @[48rem]:flex-1" />
-            <span className="flex items-center gap-2 @[48rem]:contents">
-              <span className={`${COL.id} @[48rem]:order-1`}>
-                <Skeleton className="h-3 w-10" />
-              </span>
-              <span className={`${COL.assignee} flex @[48rem]:order-3`}>
-                <Skeleton className="size-5 rounded-full @[48rem]:h-3 @[48rem]:w-16" />
-              </span>
-              <span className={`${COL.status} @[48rem]:order-4`}>
-                <Skeleton className="h-3 w-16" />
-              </span>
-              <span className={`${COL.updated} @[48rem]:order-5`}>
-                <Skeleton className="ml-auto h-3 w-12" />
-              </span>
-              <span className={`${COL.actions} @[48rem]:order-6`}>
-                <Skeleton className="h-7 w-20" />
-              </span>
-            </span>
-          </div>
-        ))}
-      </div>
-    </DelayedLoading>
+    <div className="flex flex-col gap-4">
+      {groups.map((group) => {
+        const heading = GROUP_HEADINGS[kind][group.key];
+        return (
+          <section key={group.key} className="flex flex-col gap-2">
+            <h3 className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Icon name={heading.icon} className="size-3.5" aria-hidden />
+              <span>{heading.label}</span>
+              <span className="tabular-nums">{group.items.length}</span>
+            </h3>
+            <ResourceListPanel>
+              {group.items.map((item) => (
+                <ItemRow
+                  key={`${item.repo}#${item.number}`}
+                  item={item}
+                  links={links[`${kind}:${item.repo}#${item.number}`]}
+                  onOpen={() => onOpenItem(item.repo, item.number)}
+                  actions={actions}
+                />
+              ))}
+            </ResourceListPanel>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -771,16 +841,21 @@ function ItemsTable({
   hasFilter: boolean;
   onOpenItem: (repo: string, number: number) => void;
 }) {
-  const links = useLinks();
-
-  let body: React.ReactNode;
   if (error !== null) {
-    body = <EmptyState message={error} />;
-  } else if (items === null) {
-    body = <TableSkeleton />;
-  } else if (items.length === 0) {
-    body = (
-      <EmptyState
+    return <ResourceListState state="error" message={error} />;
+  }
+  if (items === null) {
+    return (
+      <ResourceListState
+        state="loading"
+        message={`Loading ${kind === "issue" ? "issues" : "pull requests"}`}
+      />
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <ResourceListState
+        state="empty"
         message={
           hasFilter
             ? `No ${kind === "issue" ? "issues" : "pull requests"} match this filter.`
@@ -788,33 +863,9 @@ function ItemsTable({
         }
       />
     );
-  } else {
-    body = (
-      <div className="divide-y divide-border">
-        {items.map((item) => (
-          <ItemRow
-            key={`${item.repo}#${item.number}`}
-            item={item}
-            links={links[`${kind}:${item.repo}#${item.number}`]}
-            onOpen={() => onOpenItem(item.repo, item.number)}
-          />
-        ))}
-      </div>
-    );
   }
-
   return (
-    <div className="@container overflow-hidden rounded-lg border border-border bg-card">
-      <div className="hidden items-center gap-3 border-b border-border bg-muted/50 px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground @[48rem]:flex">
-        <span className={COL.id}>ID</span>
-        <span className="min-w-0 flex-1">Title</span>
-        <span className={COL.assignee}>Assignee</span>
-        <span className={COL.status}>Status</span>
-        <span className={COL.updated}>Updated</span>
-        <span className={COL.actions} />
-      </div>
-      {body}
-    </div>
+    <ItemList kind={kind} items={items} onOpenItem={onOpenItem} actions />
   );
 }
 
@@ -1822,28 +1873,7 @@ function PullPickerList({
     return <EmptyState message="No open pull requests in the tracked repos." />;
   }
   return (
-    <div className="@container/github-picker overflow-hidden rounded-lg border border-border bg-card">
-      <div className="divide-y divide-border">
-        {open.map((item) => (
-          <button
-            key={`${item.repo}#${item.number}`}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/50"
-            onClick={() => onPick(item.repo, item.number)}
-          >
-            <StateDot kind="pr" state={item.state} />
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">
-              #{item.number}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-              {item.title}
-            </span>
-            <span className="hidden shrink-0 text-xs text-muted-foreground @min-[32rem]/github-picker:block">
-              {item.repo}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
+    <ItemList kind="pr" items={open} onOpenItem={onPick} actions={false} />
   );
 }
 

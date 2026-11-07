@@ -243,3 +243,21 @@ export function buildSuggestions(
   }
   return [];
 }
+
+export interface ItemGroup {
+  key: "mine" | "others";
+  items: Item[];
+}
+
+export function groupItems(items: Item[], viewer: string | null): ItemGroup[] {
+  const isMine = (item: Item) =>
+    viewer !== null &&
+    (item.kind === "pr"
+      ? item.author === viewer
+      : item.assignees.includes(viewer));
+  const groups: ItemGroup[] = [
+    { key: "mine", items: items.filter(isMine) },
+    { key: "others", items: items.filter((item) => !isMine(item)) },
+  ];
+  return groups.filter((group) => group.items.length > 0);
+}

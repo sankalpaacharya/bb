@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSuggestions,
+  groupItems,
   matchesQuery,
   parseQuery,
   parseSubPath,
@@ -122,5 +123,44 @@ describe("github panel query engine", () => {
     expect(
       buildSuggestions("author:ali", vocab, "issue", "octocat")[0]?.icon,
     ).toEqual({ kind: "avatar", login: "alice" });
+  });
+});
+
+describe("item grouping", () => {
+  const pull = (number: number, author: string): Item => ({
+    ...issue,
+    number,
+    kind: "pr",
+    author,
+    pull: {
+      isDraft: false,
+      additions: 1,
+      deletions: 0,
+      checks: "none",
+      conflicted: false,
+    },
+  });
+
+  it("puts the viewer's pull requests and assigned issues first, keeping order", () => {
+    const pulls = [pull(1, "bob"), pull(2, "octocat"), pull(3, "alice")];
+    expect(
+      groupItems(pulls, "octocat").map((group) => [
+        group.key,
+        group.items.map((item) => item.number),
+      ]),
+    ).toEqual([
+      ["mine", [2]],
+      ["others", [1, 3]],
+    ]);
+    expect(groupItems([issue], "octocat").map((group) => group.key)).toEqual([
+      "mine",
+    ]);
+  });
+
+  it("drops empty groups and treats everything as others without a viewer", () => {
+    expect(
+      groupItems([pull(1, "octocat")], null).map((group) => group.key),
+    ).toEqual(["others"]);
+    expect(groupItems([], "octocat")).toEqual([]);
   });
 });
