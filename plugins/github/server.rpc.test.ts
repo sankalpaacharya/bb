@@ -7,8 +7,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import {
+  createFakePluginHost,
+  makeThreadResponse,
+} from "@get-bb/plugin-sdk/testing";
 import plugin from "./server";
 import { installFakeGh } from "./testing/fake-gh";
 
@@ -219,6 +223,58 @@ async function loadPlugin(extraRepos = "acme/widgets") {
   await plugin(host.bb);
   return host;
 }
+
+describe("pullForThread", () => {
+  it("returns the GitHub repositories of the thread's project only", async () => {
+    const checkout = mkdtempSync(join(tmpdir(), "bb-github-checkout-"));
+    execFileSync("git", ["init", "-q", checkout]);
+    execFileSync("git", [
+      "-C",
+      checkout,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/acme/widgets.git",
+    ]);
+    const host = createFakePluginHost({
+      pluginId: "github",
+      settings: { extraRepos: "acme/other" },
+      sdk: {
+        projects: {
+          list: async () => [
+            {
+              id: "project-a",
+              sources: [{ type: "local_path", path: checkout }],
+            },
+          ],
+        },
+        threads: {
+          get: async ({ threadId }: { threadId: string }) =>
+            makeThreadResponse({
+              id: threadId,
+              projectId: threadId === "thread-a" ? "project-a" : "project-b",
+            }),
+        },
+      },
+    });
+    await plugin(host.bb);
+    try {
+      await expect(
+        host.harness.behavior.callRpc("pullForThread", {
+          threadId: "thread-a",
+        }),
+      ).resolves.toEqual({ pull: null, projectRepos: ["acme/widgets"] });
+      await expect(
+        host.harness.behavior.callRpc("pullForThread", {
+          threadId: "thread-b",
+        }),
+      ).resolves.toEqual({ pull: null, projectRepos: [] });
+    } finally {
+      await host.harness.lifecycle.dispose();
+      rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("github plugin RPC behavior", () => {
   it("reports extraRepos entries it cannot honor instead of dropping them", async () => {

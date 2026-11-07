@@ -1911,8 +1911,10 @@ function PullDetailView({
 }
 
 function PullPickerList({
+  repos,
   onPick,
 }: {
+  repos: string[];
   onPick: (repo: string, number: number) => void;
 }) {
   const { items, error } = useItems("pr");
@@ -1928,9 +1930,21 @@ function PullPickerList({
       </DelayedLoading>
     );
   }
-  const open = items.filter((item) => item.state === "OPEN");
+  const open = items.filter(
+    (item) =>
+      item.state === "OPEN" &&
+      (repos.length === 0 || repos.includes(item.repo)),
+  );
   if (open.length === 0) {
-    return <EmptyState message="No open pull requests in the tracked repos." />;
+    return (
+      <EmptyState
+        message={
+          repos.length === 0
+            ? "No open pull requests in the tracked repos."
+            : `No open pull requests in ${repos.join(", ")}.`
+        }
+      />
+    );
   }
   return (
     <ItemList kind="pr" items={open} onOpenItem={onPick} actions={false} />
@@ -1940,6 +1954,7 @@ function PullPickerList({
 function PullPanelTab({ threadId }: ExperimentalThreadActionTabProps) {
   const rpc = useRpc<typeof githubRpcContract>();
   const [resolved, setResolved] = useState(false);
+  const [projectRepos, setProjectRepos] = useState<string[]>([]);
   const [selected, setSelected] = useState<{
     repo: string;
     number: number;
@@ -1952,6 +1967,7 @@ function PullPanelTab({ threadId }: ExperimentalThreadActionTabProps) {
       (result) => {
         if (cancelled) return;
         if (result.pull !== null) setSelected(result.pull);
+        setProjectRepos(result.projectRepos);
         setResolved(true);
       },
       () => {
@@ -1973,6 +1989,7 @@ function PullPanelTab({ threadId }: ExperimentalThreadActionTabProps) {
           No pull request is linked to this thread yet — pick one:
         </p>
         <PullPickerList
+          repos={projectRepos}
           onPick={(repo, number) =>
             setSelected({ repo, number, environmentId: null })
           }

@@ -247,6 +247,7 @@ export const githubRpcContract = defineRpcContract({
           })
           .strict()
           .nullable(),
+        projectRepos: z.array(repoNameSchema),
       })
       .strict(),
   },
@@ -1528,8 +1529,14 @@ export default async function plugin(bb: BbPluginApi) {
 
     async pullForThread({ threadId }) {
       let environmentId: string | null = null;
+      let projectRepos: string[] = [];
       try {
         const thread = await bb.sdk.threads.get({ threadId });
+        if (thread !== null) {
+          projectRepos = (await discoverRepos())
+            .filter((info) => info.projectId === thread.projectId)
+            .map((info) => info.repo);
+        }
         if (thread?.environmentId) {
           environmentId = thread.environmentId;
           const rows = await bb.sdk.plugins.callRpc({
@@ -1552,6 +1559,7 @@ export default async function plugin(bb: BbPluginApi) {
                 number: Number(match[2]),
                 environmentId,
               },
+              projectRepos,
             };
           }
         }
@@ -1567,10 +1575,11 @@ export default async function plugin(bb: BbPluginApi) {
               number: Number(match[2]),
               environmentId,
             },
+            projectRepos,
           };
         }
       }
-      return { pull: null };
+      return { pull: null, projectRepos };
     },
 
     async commentIssue({ repo, number, body }): Promise<{ ok: true }> {
